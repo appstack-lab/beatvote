@@ -7,7 +7,7 @@ export function phaseLabel(genre: string | null, era: number | null | undefined)
   return era == null ? genre : `${genre} · ${era - ERA_WINDOW_YEARS}–${era + ERA_WINDOW_YEARS}`;
 }
 
-/** Genre and/or decade the host has fixed; null fields mean "Auto" / "Any era". */
+/** Genre and/or decade the host has fixed; null fields mean "Any genre" / "Any era". */
 export interface Pin {
   genre: string | null;
   /** First year of the decade, e.g. 1990 for the 1990s. */

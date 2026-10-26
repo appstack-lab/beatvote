@@ -43,17 +43,19 @@ function saveParty(party: Party | null) {
 }
 
 /**
- * Host override: the DJ sticks to this genre and/or decade until set back to Auto / Any era. The choice only takes
- * effect with Apply, which also switches right away instead of after the current track.
+ * Host override: the DJ sticks to this genre and/or decade until cleared. The choice only takes effect with Apply,
+ * which also switches right away instead of after the current track. Clear lets the DJ choose again from the next track.
  */
 function PinPicker({
   pin,
   nowPlaying,
   onApply,
+  onClear,
 }: {
   pin: Pin;
   nowPlaying: NowPlayingState | null;
   onApply: (pin: Pin) => void;
+  onClear: () => void;
 }) {
   const [draft, setDraft] = useState(pin);
   useEffect(() => setDraft(pin), [pin.genre, pin.decade]);
@@ -65,7 +67,7 @@ function PinPicker({
       <label>
         Genre
         <select value={draft.genre ?? ''} onChange={(e) => setDraft({ ...draft, genre: e.target.value || null })}>
-          <option value="">Auto</option>
+          <option value="">Any genre</option>
           {GENRE_NAMES.map((g) => (
             <option key={g} value={g}>
               {g}
@@ -90,7 +92,21 @@ function PinPicker({
       <button onClick={() => onApply(draft)} disabled={!changed && !offPin}>
         Apply
       </button>
+      {isPinned(pin) && (
+        <button className="ghost" onClick={onClear}>
+          Clear
+        </button>
+      )}
     </div>
+  );
+}
+
+/** The app name with B and V in the logo colour. */
+function Title() {
+  return (
+    <h1>
+      <span className="brand">B</span>eat<span className="brand">V</span>ote
+    </h1>
   );
 }
 
@@ -170,7 +186,7 @@ function Setup({ onLogin }: { onLogin: () => void }) {
   );
   return (
     <main className="card">
-      <h1>BeatVote</h1>
+      <Title />
       {!isLoopbackIp() && (
         <p className="warn">
           Open this page via <b>http://127.0.0.1:{location.port}</b> instead of “{location.hostname}”. Spotify only
@@ -206,7 +222,8 @@ function Setup({ onLogin }: { onLogin: () => void }) {
             </li>
             <li>
               <b>Copy the Client ID.</b> Your new app shows it under “Basic Information”. You don't need the Client
-              Secret, don't enter it anywhere.
+              Secret, don't enter it anywhere. Then tap “Connect with Spotify”: you log in to Spotify once more, this
+              time inside BeatVote. That's normal and only needed once.
               {idInput}
               {clientId.trim() && !valid && <p className="warn">A Client ID has 32 characters from 0–9 and a–f.</p>}
             </li>
@@ -334,6 +351,7 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   }, [player.progress, player.status, session]);
 
   const canPlay = player.status !== 'loading' && player.status !== 'error';
+  const djRunning = player.status === 'running' || player.status === 'waiting';
   // Guests voted the track away: move on, once per play (startedAt identifies it).
   const skippedPlay = useRef<number | null>(null);
   useEffect(() => {
@@ -399,16 +417,19 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   return (
     <main className="card wide">
       <header className="row">
-        <h1>BeatVote</h1>
+        <Title />
         <span className="row">
-          {session &&
-            (player.status === 'running' || player.status === 'waiting' ? (
-              <button onClick={player.stop}>Stop</button>
-            ) : (
-              <button onClick={player.start} disabled={player.status !== 'ready'}>
-                Start DJ
-              </button>
-            ))}
+          {session && (
+            // Both labels take up space, so the button keeps its width when Start DJ turns into Stop.
+            <button
+              className="stack"
+              onClick={djRunning ? player.stop : player.start}
+              disabled={!djRunning && player.status !== 'ready'}
+            >
+              <span className={djRunning ? 'hidden' : undefined}>Start DJ</span>
+              <span className={djRunning ? undefined : 'hidden'}>Stop</span>
+            </button>
+          )}
           {session && (
             <button className="ghost" onClick={endParty}>
               End party
@@ -445,9 +466,12 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                       api
                         .setPin(session.code, session.hostKey, pin.genre, pin.decade)
                         .then(() => {
-                          if (player.status === 'running' || player.status === 'waiting') player.skip();
+                          if (djRunning) player.skip();
                         })
                         .catch((e) => setErr(e.message))
+                    }
+                    onClear={() =>
+                      api.setPin(session.code, session.hostKey, null, null).catch((e) => setErr(e.message))
                     }
                   />
                   <VolumeSlider
@@ -490,11 +514,7 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                 progress={player.progress}
                 aside={
                   <>
-                    <button
-                      className="ghost"
-                      onClick={player.skip}
-                      disabled={player.status !== 'running' && player.status !== 'waiting'}
-                    >
+                    <button className="ghost" onClick={player.skip} disabled={!djRunning}>
                       Skip ⏭
                     </button>
                     <small>{skipStatus(state)}</small>

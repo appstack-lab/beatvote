@@ -25,6 +25,10 @@ body {
   .party { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; align-items: start; }
 }
 h1 { margin: 0; font-size: 1.6rem; }
+.brand { color: var(--accent); }
+.stack { display: inline-grid; }
+.stack > span { grid-area: 1 / 1; }
+.stack > .hidden { visibility: hidden; }
 h2 { margin: 8px 0 0; font-size: 1.1rem; }
 input { width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--muted); background: var(--card); color: var(--text); font: inherit; }
 label { display: flex; flex-direction: column; gap: 4px; }
@@ -34,6 +38,11 @@ button.ghost { background: transparent; color: var(--text); border: 1px solid va
 a { color: var(--accent); }
 code.block { display: block; padding: 8px; background: var(--card); border-radius: 8px; word-break: break-all; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+/* On phones the header buttons move below the title instead of breaking their labels. */
+header.row, header .row { flex-wrap: wrap; }
+header .row { justify-content: flex-start; gap: 8px; }
+header button { white-space: nowrap; }
+@media (max-width: 480px) { header button { padding: 8px 12px; } }
 .list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px; background: var(--card); border-radius: 10px; }
 .list li > span:first-child { flex: 1; min-width: 0; }
