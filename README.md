@@ -1,8 +1,8 @@
-<img src="web/public/icon.svg" alt="" width="88" align="right">
+<p align="center"><img src="web/public/icon.svg" alt="BeatVote logo" width="96"></p>
 
-# BeatVote
+<h1 align="center">BeatVote</h1>
 
-**Your guests pick the music. The DJ keeps the vibe.**
+<p align="center"><b>Your guests pick the music. The DJ keeps the vibe.</b></p>
 
 BeatVote turns an Android tablet or phone into a party DJ. Guests scan a QR code, search for songs and vote for them. An automatic DJ plays the most wanted songs through Spotify and stays in the current style, genre and era, as long as the crowd wants it.
 
