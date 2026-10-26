@@ -1,7 +1,8 @@
 apply plugin: 'com.android.application'
 
-// Release signing: the key never lives in the repository. build-android-docker.sh --release hands the keystore and
-// this properties file to the Docker build as secrets; without them only the debug build is possible.
+// Release signing: the key never lives in the repository. build-android-docker.sh hands the keystore and this
+// properties file to the Docker build as secrets; without them only the debug build is possible. Debug builds use the
+// release key too when it is there, so test and release APKs update each other and the app keeps its data.
 def releaseProps = new Properties()
 def releasePropsFile = file(System.getenv('BEATVOTE_RELEASE_PROPS') ?: '/nonexistent')
 if (releasePropsFile.exists()) releasePropsFile.withInputStream { releaseProps.load(it) }
@@ -13,8 +14,8 @@ android {
         applicationId "com.beatvote.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "0.1.2"
+        versionCode 4
+        versionName "0.1.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -33,6 +34,9 @@ android {
         }
     }
     buildTypes {
+        debug {
+            if (releasePropsFile.exists()) signingConfig signingConfigs.release
+        }
         release {
             if (releasePropsFile.exists()) signingConfig signingConfigs.release
             minifyEnabled false
