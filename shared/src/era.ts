@@ -1,10 +1,11 @@
 /** A DJ phase keeps to songs released within this many years of the song that started it. */
 export const ERA_WINDOW_YEARS = 10;
 
-/** "rock · 1990–2010", or just the genre while the phase has no reference year. */
+/** "rock · 1990–2010", or just the genre while the phase has no reference year. The window ends this year. */
 export function phaseLabel(genre: string | null, era: number | null | undefined): string {
   if (!genre) return '–';
-  return era == null ? genre : `${genre} · ${era - ERA_WINDOW_YEARS}–${era + ERA_WINDOW_YEARS}`;
+  if (era == null) return genre;
+  return `${genre} · ${era - ERA_WINDOW_YEARS}–${Math.min(era + ERA_WINDOW_YEARS, new Date().getFullYear())}`;
 }
 
 /** Genre and/or decade the host has fixed; null fields mean "Any genre" / "Any era". */

@@ -19,7 +19,7 @@ BeatVote turns an Android tablet or phone into a party DJ. Guests scan a QR code
 
 - **Guests need nothing but a browser.** They scan the QR code, search for songs and request or upvote them. No app, no Spotify account, no login.
 - **A DJ that reads the room.** Requests with more votes play first. The DJ stays in a phase (a genre family within ±10 years of the song that started it) and only switches when another style is clearly wanted, so Linkin Park isn't followed by a 1980 AC/DC track just because both count as rock.
-- **Never silent.** When the request list runs dry, the DJ keeps playing from the current genre and era and avoids artists heard in the last 10 songs.
+- **Never silent.** When the request list runs dry, the DJ keeps playing from the current genre and era and avoids artists heard in the last 20 songs.
 - **Skip voting.** If more than half of the guests online want to skip a song, it's skipped.
 - **Host controls.** Search and queue songs, play one right away, skip, pin a genre and/or decade, set the volume and lock it for guests.
 - **Device volume sync.** On Android the volume slider is the device's media volume, including the hardware buttons.
@@ -80,7 +80,7 @@ Open the host page at **http://127.0.0.1:5173** (not `localhost`: Spotify only a
 Ideas, no promises:
 
 - **Desktop app** for Windows, macOS and Linux, with the host page in the system browser.
-- **NAS support:** run the BeatVote server on a home NAS, so the party doesn't depend on the host's phone or tablet.
+- **Your own music library:** play your own files through a media server on your NAS or home server, such as Navidrome, Jellyfin or Plex. No streaming account needed.
 - **More streaming services**, but only those that allow it in their terms and offer a suitable API.
 
 ## Status and limitations

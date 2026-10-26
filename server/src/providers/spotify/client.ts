@@ -54,9 +54,7 @@ export const spotify: MusicProvider = {
     return musicBrainzTags(data.name);
   },
 
-  searchByGenre(token, genre, years) {
-    // Random offset so auto-fill does not replay the same top 10 every time.
-    const offset = Math.floor(Math.random() * 5) * 10;
+  searchByGenre(token, genre, years, offset = 0) {
     const filters = [genre && `genre:"${genre}"`, years && `year:${years.from}-${years.to}`].filter(Boolean);
     return searchTracks(token, filters.join(' '), offset);
   },

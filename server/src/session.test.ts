@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import type { Track } from '../../shared/src/types';
 import type { MusicProvider } from './providers/types';
+import type { Session } from './session';
 
 const dir = mkdtempSync(join(tmpdir(), 'dj-test-'));
 process.env.DJ_DATA_FILE = join(dir, 'sessions.json');
@@ -74,7 +75,7 @@ describe('auto-fill', () => {
     expect(s.state()).toMatchObject({ currentGenre: 'house', nowPlaying: { auto: true } });
   });
 
-  it('fills within the phase era and skips artists from the last 10 songs', async () => {
+  it('fills within the phase era and skips the artist of the last song', async () => {
     const before = await restart();
     const calls: (string | undefined)[] = [];
     const lp = { ...track('lp'), artistId: 'linkinpark', year: 2000 };
@@ -112,6 +113,73 @@ describe('auto-fill', () => {
     await s.addWish('g1', { ...track('first'), artistId: 'same' });
     await s.next();
     expect((await s.next())?.track.id).toBe('again');
+  });
+
+  // Plays one wish per artist, oldest first.
+  async function playArtists(s: Session, artists: string[]) {
+    for (const [i, artistId] of artists.entries()) {
+      await s.addWish('g1', { ...track(`t${i}`), artistId });
+      await s.next();
+    }
+  }
+
+  it('skips artists heard in the last 20 songs', async () => {
+    const { createSession } = await restart();
+    const s = createSession({
+      ...provider,
+      searchByGenre: async () => [{ ...track('old-again'), artistId: 'old' }, { ...track('new'), artistId: 'new' }],
+    });
+    s.token = 'tok';
+    // "old" played 20 songs ago, 19 other artists since.
+    await playArtists(s, ['old', ...Array.from({ length: 19 }, (_, i) => `a${i}`)]);
+    expect((await s.next())?.track.id).toBe('new');
+  });
+
+  it('repeats the artist heard longest ago when only recent ones come up', async () => {
+    const { createSession } = await restart();
+    const s = createSession({
+      ...provider,
+      searchByGenre: async () => [{ ...track('b2'), artistId: 'b' }, { ...track('a2'), artistId: 'a' }],
+    });
+    s.token = 'tok';
+    await playArtists(s, ['a', 'b']);
+    expect((await s.next())?.track.id).toBe('a2');
+  });
+
+  it('stays in the phase window rather than playing a fresh artist from another era', async () => {
+    const { createSession } = await restart();
+    const offsets = new Set<number | undefined>();
+    const s = createSession({
+      ...provider,
+      artistGenres: async () => ['metalcore'],
+      searchByGenre: async (_t, _g, years, offset) => {
+        if (years) offsets.add(offset);
+        return years ? [{ ...track('sb2'), artistId: 'spiritbox', year: 2023 }] : [{ ...track('soad'), artistId: 'soad', year: 2001 }];
+      },
+    });
+    s.token = 'tok';
+    await s.addWish('g1', { ...track('sb'), artistId: 'spiritbox', year: 2021 });
+    await s.next();
+    expect((await s.next())?.track.id).toBe('sb2');
+    expect(offsets.size).toBe(5); // five different result pages of the phase
+  });
+
+  it('ends the phase window this year', async () => {
+    const { createSession } = await restart();
+    const ranges: string[] = [];
+    const year = new Date().getFullYear();
+    const s = createSession({
+      ...provider,
+      searchByGenre: async (_t, _g, years) => {
+        ranges.push(`${years?.from}-${years?.to}`);
+        return [{ ...track('new'), artistId: 'new', year }];
+      },
+    });
+    s.token = 'tok';
+    await s.addWish('g1', { ...track('now'), artistId: 'b', year });
+    await s.next();
+    await s.next();
+    expect(ranges).toEqual([`${year - 10}-${year}`]);
   });
 
   it('waits when nothing has a known genre yet', async () => {
@@ -269,7 +337,8 @@ describe('host picks genre and decade', () => {
     await s.next();
     s.setPin(null, 1990); // DJ stays in metal, finds nothing in the 90s, then drops the genre but not the decade
     await s.next();
-    expect(calls).toEqual(['- 1990-1999', 'metal 1990-1999', 'metal 1990-1999', 'metal 1990-1999', 'metal 1990-1999', '- 1990-1999']);
+    // Third song: five pages of metal in the 90s, then the decade alone.
+    expect(calls).toEqual(['- 1990-1999', 'metal 1990-1999', ...Array(5).fill('metal 1990-1999'), '- 1990-1999']);
 
     const after = await restart();
     after.restoreSessions(provider);

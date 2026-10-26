@@ -7,7 +7,12 @@ export interface MusicProvider {
   artistGenres(token: string, artistId: string): Promise<string[]>;
   /**
    * Tracks for a genre and/or released within `years` (at least one of both), used to auto-fill when no wishes
-   * are left.
+   * are left. `offset` pages through the results.
    */
-  searchByGenre(token: string, genre: string | null, years?: { from: number; to: number }): Promise<Track[]>;
+  searchByGenre(
+    token: string,
+    genre: string | null,
+    years?: { from: number; to: number },
+    offset?: number,
+  ): Promise<Track[]>;
 }

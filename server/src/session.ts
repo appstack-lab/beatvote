@@ -12,7 +12,10 @@ import { readSnapshots, writeSnapshots } from './store';
 const MAX_OPEN_WISHES_PER_GUEST = 3;
 const DEFAULT_VOLUME = 80;
 /** Auto-fill avoids artists heard in this many recent songs. */
-const RECENT_ARTIST_TRACKS = 10;
+const RECENT_ARTIST_TRACKS = 20;
+/** Auto-fill searches up to this many result pages (10 tracks each) of the phase, out of the first AUTO_FILL_PAGES. */
+const AUTO_FILL_PHASE_SEARCHES = 5;
+const AUTO_FILL_PAGES = Array.from({ length: 10 }, (_, i) => i);
 /** When to look up an unknown genre again after a wish came in. */
 const GENRE_RETRY_DELAYS_MS = [30_000, 2 * 60_000, 10 * 60_000];
 /** How many recently played tracks clients get; the full history stays on the server for auto-fill. */
@@ -324,7 +327,7 @@ export class Session {
       pin.decade !== null
         ? { from: pin.decade, to: pin.decade + 9 }
         : genre === this.currentGenre && this.currentEra !== null
-          ? { from: this.currentEra - w, to: this.currentEra + w }
+          ? { from: this.currentEra - w, to: Math.min(this.currentEra + w, new Date(now).getFullYear()) }
           : undefined;
     if (!genre && !years) return null;
     // A picked decade is a hard rule, so is a picked genre; the DJ's own genre and time window may be dropped
@@ -347,8 +350,10 @@ export class Session {
   }
 
   /**
-   * A not yet played track of the genre by an artist not heard in the last 10 songs, preferably released within
-   * the phase's time window. Search offsets are random, so retries differ.
+   * A not yet played track of the genre by an artist not heard in the last 20 songs, released within the phase's
+   * time window. Staying in the phase beats a fresh artist: a recent artist (the one heard longest ago) is taken
+   * before the window or (with only a decade picked) the genre is dropped, and that only happens when the phase has
+   * no unplayed track left in the searched pages.
    */
   private async autoFill(
     token: string,
@@ -358,23 +363,30 @@ export class Session {
   ): Promise<Track | undefined> {
     const played = new Set(this.history.map((h) => h.track.id));
     const recentArtists = new Set(this.history.slice(-RECENT_ARTIST_TRACKS).map((h) => h.track.artistId));
-    const repeats: Track[] = [];
-    // Genre and time window first, then (where allowed) without one of them: rather close than silence.
-    const attempts: [string | null, typeof years][] = [
-      [genre, years],
-      [genre, years],
-      [genre, years],
-    ];
-    if (relax.mayDropYears && genre) attempts.push([genre, undefined]);
-    if (relax.mayDropGenre && genre && years) attempts.push([null, years]);
-    for (const [g, range] of attempts) {
-      const candidates = (await this.provider.searchByGenre(token, g, range)).filter((t) => !played.has(t.id));
-      const fresh = candidates.find((t) => !recentArtists.has(t.artistId));
-      if (fresh) return fresh;
-      repeats.push(...candidates);
-    }
-    // Only recently heard artists came up: a repeated artist still beats stopping the music.
-    return repeats[0];
+    const lastHeard = new Map(this.history.map((h, i) => [h.track.artistId, i]));
+    const heardLongestAgo = (tracks: Track[]) =>
+      tracks.sort((a, b) => (lastHeard.get(a.artistId) ?? -1) - (lastHeard.get(b.artistId) ?? -1))[0];
+
+    // Different result pages in random order: the top results of a phase come from few artists.
+    const search = async (g: string | null, range: typeof years, pages: number) => {
+      const repeats: Track[] = [];
+      for (const page of shuffled(AUTO_FILL_PAGES).slice(0, pages)) {
+        const candidates = (await this.provider.searchByGenre(token, g, range, page * 10)).filter(
+          (t) => !played.has(t.id),
+        );
+        const fresh = candidates.find((t) => !recentArtists.has(t.artistId));
+        if (fresh) return fresh;
+        repeats.push(...candidates);
+      }
+      return heardLongestAgo(repeats);
+    };
+
+    const inPhase = await search(genre, years, AUTO_FILL_PHASE_SEARCHES);
+    if (inPhase) return inPhase;
+    // Nothing unplayed in the phase: rather close than silence.
+    if (relax.mayDropYears && genre) return search(genre, undefined, 2);
+    if (relax.mayDropGenre && genre && years) return search(null, years, 2);
+    return undefined;
   }
 
   /** Host override: plays a wish right away, regardless of the DJ's genre rule. */
@@ -474,4 +486,13 @@ export function getSession(code: string): Session {
   const s = sessions.get(code.toUpperCase());
   if (!s) throw new HttpError(404, 'Party not found');
   return s;
+}
+
+function shuffled<T>(items: readonly T[]): T[] {
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
 }
