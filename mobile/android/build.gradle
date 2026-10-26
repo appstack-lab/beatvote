@@ -1,0 +1,38 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'com.google.gms:google-services:4.4.4'
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+apply from: "variables.gradle"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// capacitor-nodejs compiles libnative-lib.so with NDK r27, which still links with 4 KB page alignment.
+// Android 15+ devices with 16 KB pages then run the app in compatibility mode and show a warning.
+// Patched here instead of in node_modules, which is reinstalled on every build.
+project(':capacitor-nodejs') {
+    plugins.withId('com.android.library') {
+        android.defaultConfig.externalNativeBuild.cmake.arguments '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

@@ -1,0 +1,22 @@
+{
+  "name": "beatvote-mobile",
+  "version": "1.0.0",
+  "description": "BeatVote Android app (Capacitor): runs the BeatVote server on the device and shows the web UI.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "bundle:node": "node build-node.mjs",
+    "sync": "npm run bundle:node && cap sync android"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.5.3",
+    "capacitor-nodejs": "https://github.com/hampoelz/capacitor-nodejs/releases/download/v1.0.0-beta.10/capacitor-nodejs.tgz"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3",
+    "esbuild": "0.28.2",
+    "undici": "5.29.0"
+  }
+}

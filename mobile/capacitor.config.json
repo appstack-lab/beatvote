@@ -1,0 +1,15 @@
+{
+  "appId": "com.beatvote.app",
+  "appName": "BeatVote",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "allowNavigation": ["127.0.0.1", "accounts.spotify.com", "challenge.spotify.com"]
+  },
+  "plugins": {
+    "CapacitorNodeJS": {
+      "nodeDir": "nodejs"
+    }
+  }
+}

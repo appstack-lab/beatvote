@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BeatVote</string>
+    <string name="title_activity_main">BeatVote</string>
+    <string name="package_name">com.beatvote.app</string>
+    <string name="custom_url_scheme">com.beatvote.app</string>
+</resources>

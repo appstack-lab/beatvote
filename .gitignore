@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+# saved party sessions (contain host keys)
+server/data/
+*.local
+.playwright-mcp/
+# desktop
+desktop/dist/
+desktop/server.mjs
+dist-desktop/
+dist-android/
+# local agent settings (Qwen Code)
+.qwen/
