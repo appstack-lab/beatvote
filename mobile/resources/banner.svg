@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 180">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="180" fill="url(#bg)"/>
+  <!-- Same letters as icon.svg, scaled down; the name is set in Noto Sans (SIL Open Font License). -->
+  <g transform="translate(26 50) scale(0.17) translate(-200 -278)" fill="none" stroke="#fff" stroke-width="84" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M242 320V704M242 320H362A90 90 0 0 1 362 500H242M242 500H382A102 102 0 0 1 382 704H242"/>
+    <path d="M582 320L682 704L782 320"/>
+  </g>
+  <text x="146" y="102" fill="#fff" font-family="Noto Sans" font-weight="700" font-size="34">BeatVote</text>
+</svg>

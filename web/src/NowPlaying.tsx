@@ -12,15 +12,20 @@ export function skipStatus(state: SessionState): string {
   return np.skipRequested ? 'Skipping …' : `${np.skipVoters?.length ?? 0}/${state.skipNeeded} skip votes`;
 }
 
-/** The current track as a framed card; `aside` (the skip button) sits on the right. */
+/**
+ * The current track as a framed card; `aside` (the skip button) sits on the right. `phase: false` leaves out the
+ * genre/era line when the page shows it elsewhere.
+ */
 export function NowPlaying({
   state,
   progress,
   aside,
+  phase = true,
 }: {
   state: SessionState;
   progress: { positionMs: number; durationMs: number } | null;
   aside?: ReactNode;
+  phase?: boolean;
 }) {
   const np = state.nowPlaying;
   if (!np) return null;
@@ -30,10 +35,7 @@ export function NowPlaying({
       <div className="now-info">
         <b>{np.track.name}</b>
         <div>{withYear(np.track)}</div>
-        <small>
-          {currentPhaseLabel(state.pin, state.currentGenre, state.currentEra)}
-          {np.auto && ' · picked by the DJ'}
-        </small>
+        {phase && <small>{currentPhaseLabel(state.pin, state.currentGenre, state.currentEra)}</small>}
         {progress && <Progress {...progress} />}
       </div>
       {aside && <div className="now-aside">{aside}</div>}

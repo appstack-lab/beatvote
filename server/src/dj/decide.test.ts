@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Wish } from '../../../shared/src/types';
 import { decideNext } from './decide';
-import { normalizeGenre } from './genre';
+import { normalizeGenre, phaseStyle, styleOf } from './genre';
+import { wishScore } from './scoring';
 
 const NOW = 1_000_000;
 let n = 0;
@@ -41,6 +42,43 @@ describe('normalizeGenre', () => {
   it('lets the most used tags decide', () => {
     expect(normalizeGenre(['hip hop', 'conscious hip hop', 'jazz rap', 'hardcore hip hop'])).toBe('hip hop');
     expect(normalizeGenre(['alternative rock', 'grunge', 'heavy metal'])).toBe('rock');
+  });
+});
+
+describe('styleOf', () => {
+  it('picks the strongest tag of the family, not the family itself', () => {
+    expect(styleOf(['metalcore', 'post-hardcore', 'alternative metal'], 'metal')).toBe('metalcore'); // Bad Omens
+    expect(styleOf(['nu metal', 'alternative rock', 'rap metal'], 'metal')).toBe('nu metal'); // Linkin Park
+    expect(styleOf(['Power Metal', 'heavy metal'], 'metal')).toBe('power metal');
+    expect(styleOf(['metal', 'rock'], 'metal')).toBeNull();
+    expect(styleOf(['hard rock', 'rock'], 'metal')).toBeNull();
+  });
+});
+
+describe('phaseStyle', () => {
+  it('takes the most frequent style, the latest on a tie', () => {
+    expect(phaseStyle(['metalcore', 'nu metal', 'metalcore'])).toBe('metalcore');
+    expect(phaseStyle(['metalcore', 'nu metal'])).toBe('nu metal');
+    expect(phaseStyle([])).toBeNull();
+  });
+});
+
+describe('wishScore', () => {
+  const at = (votes: number, addedAt: number): Wish => ({ ...wish('x', votes), addedAt });
+
+  it('puts the longer waiting wish first among equal votes', () => {
+    expect(wishScore(at(1, NOW - 60_000), NOW)).toBeGreaterThan(wishScore(at(1, NOW - 30_000), NOW));
+  });
+
+  it('plays the earlier request first when the phase has none and votes are equal', () => {
+    const slipknot = { ...wish('metal', 1, 'sic'), addedAt: NOW - 26_000, track: { ...wish('metal', 1).track, year: 2009 } };
+    const deichkind = { ...wish('edm', 1, 'remmidemmi'), addedAt: NOW, track: { ...wish('edm', 1).track, year: 2006 } };
+    const d = decideNext({ wishes: [deichkind, slipknot], currentGenre: 'metal', currentEra: 2021, songsInGenre: 5 }, NOW);
+    expect(d.wish?.id).toBe('sic');
+  });
+
+  it('lets one more vote beat any waiting time', () => {
+    expect(wishScore(at(2, NOW), NOW)).toBeGreaterThan(wishScore(at(1, NOW - 24 * 3600_000), NOW));
   });
 });
 

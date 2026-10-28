@@ -70,4 +70,8 @@ export interface SessionState {
   guestSkip: boolean;
   /** Genre and/or decade fixed by the host; the DJ only plays matching songs while set. */
   pin: Pin;
+  /** Request the DJ would play if the current track ended now; null when it would pick a track itself. */
+  upNext: string | null;
+  /** The host has arranged the requests by hand: they play in list order instead of by votes and genre. */
+  manualOrder: boolean;
 }

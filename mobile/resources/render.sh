@@ -22,5 +22,9 @@ for f in "$RES"/drawable*/splash.png; do
   rsvg-convert -w "$size" icon.svg | magick -size "${w}x${h}" xc:'#12111a' - -gravity center -composite -strip "$f"
 done
 
+# Android TV home screen banner (320 x 180 at xhdpi). Needs the Noto Sans font installed.
+mkdir -p "$RES/drawable-xhdpi"
+rsvg-convert -w 320 banner.svg -o "$RES/drawable-xhdpi/banner.png"
+
 # Favicon of the host and guest pages.
 cp icon.svg ../../web/public/icon.svg

@@ -1,8 +1,8 @@
 import QRCode from 'qrcode';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NowPlaying as NowPlayingState, SessionState } from '../../../shared/src/types';
 import { api, watchSession } from '../api';
-import { DECADES, isPinned, matchesPin, phaseLabel, type Pin } from '../../../shared/src/era';
+import { currentPhaseLabel, DECADES, isPinned, matchesPin, phaseLabel, type Pin } from '../../../shared/src/era';
 import { GENRE_NAMES } from '../../../shared/src/genres';
 import { History, withYear } from '../History';
 import { NowPlaying, skipStatus } from '../NowPlaying';
@@ -20,8 +20,8 @@ import {
   startLogin,
   type Tokens,
 } from './spotifyAuth';
-import { NATIVE_VOLUME_EVENT, nativeVolume } from './native';
-import { usePlayer } from './usePlayer';
+import { isTv, NATIVE_VOLUME_EVENT, nativeVolume } from './native';
+import { usePlayer, type ConnectDevice } from './usePlayer';
 
 // The party (code + host key) lives in localStorage so closing the app does not lose it. Older builds kept it
 // in sessionStorage, which the app clears on close; read that once as a fallback.
@@ -101,6 +101,183 @@ function PinPicker({
   );
 }
 
+const OUTPUT_KEY = 'dj.output';
+const VIEW_KEY = 'dj.view';
+const THEME_KEY = 'dj.theme';
+
+/** The host's own choice of light or dark; null follows the device. */
+function loadTheme(): 'dark' | 'light' | null {
+  try {
+    const theme = localStorage.getItem(THEME_KEY);
+    return theme === 'dark' || theme === 'light' ? theme : null;
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme: 'dark' | 'light' | null) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+}
+
+const isDark = () =>
+  (loadTheme() ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')) === 'dark';
+
+/** What everyone at the party sees on the host's screen: the music and the QR code, no settings. */
+function PartyScreen({
+  state,
+  progress,
+  error,
+  onHost,
+}: {
+  state: SessionState;
+  progress: { positionMs: number; durationMs: number } | null;
+  error: string | null;
+  onHost: () => void;
+}) {
+  const next = state.wishes.find((w) => w.id === state.upNext);
+  const requests = state.wishes.filter((w) => w.id !== state.upNext);
+  return (
+    <main className="card wide party-screen">
+      <header className="row">
+        <Title />
+        <span className="row">
+          {state.currentGenre && (
+            <span className="muted">{currentPhaseLabel(state.pin, state.currentGenre, state.currentEra)}</span>
+          )}
+          {/* The switch replaces the whole page, so the remote's selection moves to the button that switches back. */}
+          <button className="ghost" onClick={onHost} autoFocus>
+            ⚙ Host
+          </button>
+        </span>
+      </header>
+      <div className="party">
+        <div className="col">
+          <GuestLink code={state.code} />
+          <p className="muted">Scan to request a song</p>
+          <NowPlaying state={state} progress={progress} phase={false} />
+          {error && <p className="warn">{error}</p>}
+        </div>
+        <div className="col">
+          <h2>Up next</h2>
+          {next ? (
+            <ul className="list">
+              <li>
+                <span>
+                  {next.track.name} <small>{withYear(next.track)}</small>
+                </span>
+                <span className="pill">{next.voters.length} 👍</span>
+              </li>
+            </ul>
+          ) : (
+            <p className="muted">The DJ picks the next song.</p>
+          )}
+          <h2>Requests</h2>
+          <ul className="list">
+            {requests.map((w) => (
+              <li key={w.id}>
+                <span>
+                  {w.track.name} <small>{withYear(w.track)}</small>
+                </span>
+                <span className="pill">{w.voters.length} 👍</span>
+              </li>
+            ))}
+            {requests.length === 0 && <li className="muted">No other requests yet</li>}
+          </ul>
+          <History entries={state.history} scroll />
+        </div>
+      </div>
+    </main>
+  );
+}
+
+interface Output {
+  id: string;
+  name: string;
+}
+
+function loadOutput(): Output | null {
+  try {
+    return JSON.parse(localStorage.getItem(OUTPUT_KEY) ?? 'null') as Output | null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Where the music plays: this device (Spotify's web player) or a Spotify Connect device, e.g. the Spotify app on a
+ * TV where the web player can't play.
+ */
+function OutputPicker({
+  value,
+  disabled,
+  onChange,
+  loadDevices,
+}: {
+  value: Output | null;
+  disabled: boolean;
+  onChange: (output: Output | null) => void;
+  loadDevices: () => Promise<ConnectDevice[]>;
+}) {
+  const [devices, setDevices] = useState<ConnectDevice[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const tv = isTv();
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  // Spotify's web player doesn't work on Android TV boxes: there, the TV's own Spotify app is picked by default.
+  const refresh = () =>
+    loadDevices().then(
+      (d) => {
+        setDevices(d);
+        setErr(null);
+        const app = d.find((x) => x.type === 'TV');
+        if (tv && !valueRef.current && app) onChange({ id: app.id, name: app.name });
+      },
+      (e: Error) => setErr(e.message),
+    );
+  useEffect(() => void refresh(), []);
+  // Keep looking while the chosen device is missing (a TV's Spotify app only shows up while it's open or was used
+  // lately; the first look may also happen before the login token is renewed), or, on a TV, while none is chosen.
+  const found = !!value && devices.some((d) => d.id === value.id);
+  useEffect(() => {
+    if (disabled || found || (!value && !tv)) return;
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => clearInterval(timer);
+  }, [value, disabled, found]);
+  // A saved device that is offline right now stays selectable, so the choice isn't lost.
+  const missing = value && !devices.some((d) => d.id === value.id) ? value : null;
+  return (
+    <div className="row pin">
+      <label>
+        Play on
+        <select
+          value={value?.id ?? ''}
+          disabled={disabled}
+          onChange={(e) => {
+            const d = devices.find((x) => x.id === e.target.value) ?? (missing?.id === e.target.value ? missing : null);
+            onChange(d ? { id: d.id, name: d.name } : null);
+          }}
+        >
+          <option value="">This device</option>
+          {devices.map((d) => (
+            <option key={d.id} value={d.id}>
+              {d.name}
+            </option>
+          ))}
+          {missing && <option value={missing.id}>{missing.name} (not found)</option>}
+        </select>
+      </label>
+      <button className="ghost" onClick={() => void refresh()} title="Look for Spotify devices again">
+        ↻
+      </button>
+      {err && <small className="warn">{err}</small>}
+      {tv && !value && (
+        <small className="warn">Open the Spotify app on this TV once, then come back: BeatVote plays through it.</small>
+      )}
+    </div>
+  );
+}
+
 /** The app name with B and V in the logo colour. */
 function Title() {
   return (
@@ -127,7 +304,9 @@ function ResumeParty({ party, onResume, onNew }: { party: Party; onResume: () =>
         <p className="muted">The requests are gone, but resuming keeps the code, so guests can rejoin with the same QR code.</p>
       )}
       <div className="row">
-        <button onClick={onResume}>Resume party</button>
+        <button onClick={onResume} autoFocus>
+          Resume party
+        </button>
         <button className="ghost" onClick={onNew}>
           Start new party
         </button>
@@ -166,7 +345,26 @@ function CopyField({ label, value }: { label: string; value: string }) {
  * Each host registers their own Spotify developer app (dev mode allows only 5 users per app).
  * The dashboard has no API for that, so this walks the host through it by hand.
  */
+/** On a TV the dashboard is much easier on a phone, and TV browsers often can't even get past its cookie banner. */
+function DashboardQr() {
+  const [qr, setQr] = useState('');
+  useEffect(() => void QRCode.toDataURL(DASHBOARD, { margin: 1, width: 160 }).then(setQr), []);
+  return (
+    <div className="dashboard-qr">
+      {qr && <img src={qr} alt="QR code for Spotify for Developers" width={160} height={160} />}
+      <span>
+        Scan this with your phone and do steps 1 and 2 there. On the TV you only enter the Client ID.
+        <br />
+        <small>{DASHBOARD}</small>
+      </span>
+    </div>
+  );
+}
+
+const TV_LOGIN_HINT = 'On the Spotify login page, press → once on the remote to get into the email field.';
+
 function Setup({ onLogin }: { onLogin: () => void }) {
+  const tv = isTv();
   const [clientId, setId] = useState(getClientId());
   const [showGuide, setShowGuide] = useState(!getClientId());
   const valid = CLIENT_ID_PATTERN.test(clientId.trim());
@@ -203,9 +401,13 @@ function Setup({ onLogin }: { onLogin: () => void }) {
             <li>
               <b>Open Spotify for Developers.</b> Log in with your Spotify account (Premium required) and accept the
               developer terms the first time.
-              <a className="button" href={DASHBOARD} target="_blank" rel="noreferrer">
-                Open Spotify for Developers ↗
-              </a>
+              {tv ? (
+                <DashboardQr />
+              ) : (
+                <a className="button" href={DASHBOARD} target="_blank" rel="noreferrer">
+                  Open Spotify for Developers ↗
+                </a>
+              )}
             </li>
             <li>
               <b>Create an app.</b> Click “Create app” and enter these values:
@@ -216,14 +418,17 @@ function Setup({ onLogin }: { onLogin: () => void }) {
                 Under “Which API/SDKs” tick <b>Web API</b> and <b>Web Playback SDK</b>, accept the terms and save. Leave
                 Website empty.
               </span>
-              <a className="button ghost" href={`${DASHBOARD}/create`} target="_blank" rel="noreferrer">
-                Open “Create app” directly ↗
-              </a>
+              {!tv && (
+                <a className="button ghost" href={`${DASHBOARD}/create`} target="_blank" rel="noreferrer">
+                  Open “Create app” directly ↗
+                </a>
+              )}
             </li>
             <li>
               <b>Copy the Client ID.</b> Your new app shows it under “Basic Information”. You don't need the Client
               Secret, don't enter it anywhere. Then tap “Connect with Spotify”: you log in to Spotify once more, this
               time inside BeatVote. That's normal and only needed once.
+              {tv && ` ${TV_LOGIN_HINT}`}
               {idInput}
               {clientId.trim() && !valid && <p className="warn">A Client ID has 32 characters from 0–9 and a–f.</p>}
             </li>
@@ -231,7 +436,10 @@ function Setup({ onLogin }: { onLogin: () => void }) {
         </>
       ) : (
         <>
-          <p>Connect your Spotify Premium account to start the party.</p>
+          <p>
+            Connect your Spotify Premium account to start the party.
+            {tv && ` ${TV_LOGIN_HINT}`}
+          </p>
           {idInput}
           <button className="ghost" onClick={() => setShowGuide(true)}>
             Show setup guide
@@ -253,26 +461,15 @@ function Setup({ onLogin }: { onLogin: () => void }) {
 }
 
 function GuestLink({ code }: { code: string }) {
-  const [url, setUrl] = useState('');
   const [qr, setQr] = useState('');
   useEffect(() => {
     api.info().then(({ lanIps }) => {
       const host = lanIps[0] ?? location.hostname;
-      const u = `${location.protocol}//${host}:${location.port}/s/${code}`;
-      setUrl(u);
-      QRCode.toDataURL(u, { margin: 1, width: 220 }).then(setQr);
+      const url = `${location.protocol}//${host}:${location.port}/s/${code}`;
+      QRCode.toDataURL(url, { margin: 1, width: 220 }).then(setQr);
     });
   }, [code]);
-  return (
-    <div className="guestlink">
-      {qr && <img src={qr} alt="QR code for guests" width={220} height={220} />}
-      <div>
-        <b>Guest link</b>
-        <code className="block">{url}</code>
-        <small>Guests need to be on the same Wi-Fi.</small>
-      </div>
-    </div>
-  );
+  return <div className="guestlink">{qr && <img src={qr} alt="QR code for guests" width={220} height={220} />}</div>;
 }
 
 function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void }) {
@@ -282,6 +479,29 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   const [state, setState] = useState<SessionState | null>(null);
   const tokenRef = useRef(tokens);
   const [err, setErr] = useState<string | null>(null);
+  const [output, setOutput] = useState<Output | null>(loadOutput);
+  const [dark, setDark] = useState(isDark);
+  const [partyScreen, setPartyScreen] = useState(() => {
+    try {
+      return localStorage.getItem(VIEW_KEY) === 'party';
+    } catch {
+      return false;
+    }
+  });
+  // Coming back from the party screen, its button keeps the remote's selection.
+  const [fromPartyScreen, setFromPartyScreen] = useState(false);
+  const showPartyScreen = (on: boolean) => {
+    setPartyScreen(on);
+    setFromPartyScreen(!on);
+    try {
+      if (on) localStorage.setItem(VIEW_KEY, 'party');
+      else localStorage.removeItem(VIEW_KEY);
+    } catch {
+      // Only a convenience: the view just isn't remembered.
+    }
+  };
+  const nowUri = useRef<string | undefined>(undefined);
+  nowUri.current = state?.nowPlaying?.track.uri;
 
   const player = usePlayer({
     getToken: () => tokenRef.current.accessToken,
@@ -289,7 +509,18 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
       if (!session) return null;
       return api.next(session.code, session.hostKey);
     },
+    output: output?.id ?? null,
+    currentUri: () => nowUri.current,
   });
+
+  // BeatVote restarted while the Spotify app kept playing the party's track: carry on with it instead of waiting for
+  // Start (which would begin a new track). Checked once, when the player and the party state are there.
+  const adoptChecked = useRef(false);
+  useEffect(() => {
+    if (adoptChecked.current || !output || !nowUri.current || player.status !== 'ready') return;
+    adoptChecked.current = true;
+    void player.adopt();
+  }, [output, state?.nowPlaying, player.status]);
 
   // Keep the Spotify token fresh, locally and on the server (for guest searches).
   useEffect(() => {
@@ -352,6 +583,15 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
 
   const canPlay = player.status !== 'loading' && player.status !== 'error';
   const djRunning = player.status === 'running' || player.status === 'waiting';
+  // Start is selected once it can be pressed, so a TV remote starts the party with one press; only if nothing else
+  // is selected yet.
+  const startButton = useRef<HTMLButtonElement>(null);
+  const startFocused = useRef(false);
+  useEffect(() => {
+    if (startFocused.current || player.status !== 'ready' || !startButton.current) return;
+    startFocused.current = true;
+    if (document.activeElement === document.body || document.activeElement === null) startButton.current.focus();
+  }, [player.status, session]);
   // Guests voted the track away: move on, once per play (startedAt identifies it).
   const skippedPlay = useRef<number | null>(null);
   useEffect(() => {
@@ -363,20 +603,20 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   }, [state?.nowPlaying, player.status, player.skip]);
 
   // The party volume lives on the server (host and guests change it). In the Android app it drives the device's
-  // media volume, so it matches the hardware buttons, and the player itself stays at full volume. Elsewhere the
-  // player follows it directly.
+  // media volume, so it matches the hardware buttons, and the player itself stays at full volume. Elsewhere, and for
+  // a Spotify Connect device, the player follows it directly.
   const native = nativeVolume();
   // In the app the device volume counts when the host opens; until the server has it, don't push the old value.
   const [deviceVolumeSent, setDeviceVolumeSent] = useState(!native);
   useEffect(() => {
     if (!state || !deviceVolumeSent) return;
-    if (native) {
+    if (native && !output) {
       native.setVolume(state.volume);
       player.setVolume(1);
     } else {
       player.setVolume(state.volume / 100);
     }
-  }, [state?.volume, deviceVolumeSent, player.setVolume]);
+  }, [state?.volume, deviceVolumeSent, player.setVolume, output?.id]);
 
   useEffect(() => {
     if (!native || !session) return;
@@ -388,6 +628,10 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
     window.addEventListener(NATIVE_VOLUME_EVENT, onDeviceChange);
     return () => window.removeEventListener(NATIVE_VOLUME_EVENT, onDeviceChange);
   }, [session]);
+
+  const move = (id: string, direction: 'up' | 'down') => {
+    if (session) api.moveWish(session.code, session.hostKey, id, direction).catch((e) => setErr(e.message));
+  };
 
   const playWish = (id: string) => {
     if (session) void player.playNow(() => api.playWish(session.code, session.hostKey, id));
@@ -414,20 +658,37 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
     setState(null);
   }
 
+  if (session && state && partyScreen) {
+    return (
+      <PartyScreen
+        state={state}
+        progress={player.progress}
+        error={player.error ?? err}
+        onHost={() => showPartyScreen(false)}
+      />
+    );
+  }
+
   return (
     <main className="card wide">
       <header className="row">
         <Title />
         <span className="row">
           {session && (
-            // Both labels take up space, so the button keeps its width when Start DJ turns into Stop.
+            // Both labels take up space, so the button keeps its width when Start turns into Stop.
             <button
+              ref={startButton}
               className="stack"
               onClick={djRunning ? player.stop : player.start}
               disabled={!djRunning && player.status !== 'ready'}
             >
-              <span className={djRunning ? 'hidden' : undefined}>Start DJ</span>
+              <span className={djRunning ? 'hidden' : undefined}>Start</span>
               <span className={djRunning ? undefined : 'hidden'}>Stop</span>
+            </button>
+          )}
+          {session && state && (
+            <button className="ghost" onClick={() => showPartyScreen(true)} autoFocus={fromPartyScreen}>
+              Party screen
             </button>
           )}
           {session && (
@@ -455,10 +716,37 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
       ) : (
         <div className="party">
           <div className="col">
+            {/* The QR code and what's playing come first: on a TV the rest of the column is below the fold. */}
             <GuestLink code={session.code} />
+            {state?.nowPlaying && (
+              <NowPlaying
+                state={state}
+                progress={player.progress}
+                aside={
+                  <>
+                    <button className="ghost" onClick={player.skip} disabled={!djRunning}>
+                      Skip ⏭
+                    </button>
+                    <small>{skipStatus(state)}</small>
+                    <small>{state.guestsOnline} guests online</small>
+                  </>
+                }
+              />
+            )}
+            {(player.error || err) && <p className="warn">{player.error ?? err}</p>}
             <section>
               {state && (
                 <>
+                  <OutputPicker
+                    value={output}
+                    disabled={djRunning}
+                    loadDevices={player.devices}
+                    onChange={(o) => {
+                      setOutput(o);
+                      if (o) localStorage.setItem(OUTPUT_KEY, JSON.stringify(o));
+                      else localStorage.removeItem(OUTPUT_KEY);
+                    }}
+                  />
                   <PinPicker
                     pin={state.pin}
                     nowPlaying={state.nowPlaying}
@@ -503,26 +791,27 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                       />
                       Guests can vote to skip
                     </label>
+                    <label className="check">
+                      <input
+                        type="checkbox"
+                        checked={dark}
+                        onChange={(e) => {
+                          const theme = e.target.checked ? 'dark' : 'light';
+                          setDark(e.target.checked);
+                          applyTheme(theme);
+                          try {
+                            localStorage.setItem(THEME_KEY, theme);
+                          } catch {
+                            // Not remembered then; the switch still works until the app closes.
+                          }
+                        }}
+                      />
+                      Dark mode
+                    </label>
                   </div>
                 </>
               )}
-              {(player.error || err) && <p className="warn">{player.error ?? err}</p>}
             </section>
-            {state?.nowPlaying && (
-              <NowPlaying
-                state={state}
-                progress={player.progress}
-                aside={
-                  <>
-                    <button className="ghost" onClick={player.skip} disabled={!djRunning}>
-                      Skip ⏭
-                    </button>
-                    <small>{skipStatus(state)}</small>
-                    <small>{state.guestsOnline} guests online</small>
-                  </>
-                }
-              />
-            )}
             {state?.lastSwitch && (
               <p className="muted">
                 Last switch: {phaseLabel(state.lastSwitch.from, state.lastSwitch.fromEra)} →{' '}
@@ -557,9 +846,20 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                 </span>
               )}
             </Search>
-            <h2>Requests</h2>
+            <div className="row">
+              <h2>Requests</h2>
+              {state?.manualOrder && (
+                <button
+                  className="ghost"
+                  onClick={() => api.orderByVotes(session.code, session.hostKey).catch((e) => setErr(e.message))}
+                  title="Play the requests by votes again"
+                >
+                  Order by votes
+                </button>
+              )}
+            </div>
             <ul className="list">
-              {state?.wishes.map((w) => (
+              {state?.wishes.map((w, i, all) => (
                 <li key={w.id}>
                   <span>
                     {w.track.name} <small>{withYear(w.track)}</small>
@@ -571,6 +871,20 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                     </span>
                   )}
                   <span className="pill">{w.voters.length} 👍</span>
+                  {/* Moving a request switches to the host's own order: requests then play as listed. */}
+                  <span className="move">
+                    <button className="ghost icon" onClick={() => move(w.id, 'up')} disabled={i === 0} title="Move up">
+                      ↑
+                    </button>
+                    <button
+                      className="ghost icon"
+                      onClick={() => move(w.id, 'down')}
+                      disabled={i === all.length - 1}
+                      title="Move down"
+                    >
+                      ↓
+                    </button>
+                  </span>
                   <button className="ghost icon" onClick={() => playWish(w.id)} disabled={!canPlay} title="Play now">
                     ▶
                   </button>
@@ -588,6 +902,7 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
 
 export function Host() {
   const [tokens, setTokens] = useState<Tokens | null>(loadTokens());
+  useLayoutEffect(() => applyTheme(loadTheme()), []);
   const [busy, setBusy] = useState(location.pathname.startsWith('/callback'));
   const [error, setError] = useState<string | null>(null);
 

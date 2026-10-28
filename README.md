@@ -4,7 +4,7 @@
 
 <p align="center"><b>Your guests pick the music. The DJ keeps the vibe.</b></p>
 
-BeatVote turns an Android tablet or phone into a party DJ. Guests scan a QR code, search for songs and vote for them. An automatic DJ plays the most wanted songs through Spotify and stays in the current style, genre and era, as long as the crowd wants it.
+BeatVote turns an Android tablet, phone or TV into a party DJ. Guests scan a QR code, search for songs and vote for them. An automatic DJ plays the most wanted songs through Spotify and stays in the current style, genre and era, as long as the crowd wants it.
 
 <p>
   <img src="docs/screenshots/host-tablet.png" alt="Host view on a tablet: QR code, now playing, requests and recently played" width="100%">
@@ -21,7 +21,10 @@ BeatVote turns an Android tablet or phone into a party DJ. Guests scan a QR code
 - **A DJ that reads the room.** Requests with more votes play first. The DJ stays in a phase (a genre family within ±10 years of the song that started it) and only switches when another style is clearly wanted, so Linkin Park isn't followed by a 1980 AC/DC track just because both count as rock.
 - **Never silent.** When the request list runs dry, the DJ keeps playing from the current genre and era and avoids artists heard in the last 20 songs.
 - **Skip voting.** If more than half of the guests online want to skip a song, it's skipped.
-- **Host controls.** Search and queue songs, play one right away, skip, pin a genre and/or decade, set the volume and lock it for guests.
+- **Host controls.** Search and queue songs, play one right away, skip, reorder the requests, pin a genre and/or decade, set the volume and lock it for guests.
+- **Party screen.** A clean view for everyone to see: QR code, now playing, up next, requests and history. Light or dark.
+- **Android TV.** Runs on Android TV boxes such as the NVIDIA Shield, controlled with the remote.
+- **Play anywhere.** Play on the device itself or on any Spotify Connect device, e.g. the Spotify app on your TV.
 - **Device volume sync.** On Android the volume slider is the device's media volume, including the hardware buttons.
 - **Remaining time, recently played and resume.** Close the app and pick the party up again with the same QR code.
 - **Runs entirely on the device.** The server is embedded in the app; guests connect over the local Wi-Fi.
@@ -44,7 +47,8 @@ Genres come from Spotify. When Spotify has none for an artist, BeatVote falls ba
 
 - **Spotify Premium** for the host. Guests don't need Spotify.
 - **Your own Spotify developer app** (free). The app walks you through it on first start, it takes about five minutes.
-- An **Android** tablet or phone (tested on Android 16 and 17). Guests have to be on the same Wi-Fi.
+- An **Android** tablet, phone or TV (tested on Android 11, 16 and 17). Guests have to be on the same Wi-Fi.
+- On Android TV: the **Spotify app** on the TV, BeatVote plays through it.
 
 ## Spotify setup (once per host)
 
@@ -86,7 +90,7 @@ Ideas, no promises:
 ## Status and limitations
 
 - Experimental, made for **private parties**. Public events need their own music licences.
-- Spotify doesn't officially support its Web Playback SDK on mobile devices. It works on the tested devices but could break.
+- Spotify doesn't officially support its Web Playback SDK on mobile devices. It works on the tested phones and tablets but could break. On Android TV it doesn't work, so BeatVote plays through the Spotify app there.
 - Remasters and compilations carry their own (later) release year, which can put a song into the wrong era.
 - Genre families are a heuristic; some artists sit on the border (e.g. rock vs. metal).
 

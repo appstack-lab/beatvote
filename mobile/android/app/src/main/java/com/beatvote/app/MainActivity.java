@@ -2,9 +2,11 @@ package com.beatvote.app;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.app.UiModeManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.database.ContentObserver;
 import android.media.AudioManager;
 import android.net.Uri;
@@ -19,6 +21,7 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.BridgeWebViewClient;
 
 public class MainActivity extends BridgeActivity {
 
@@ -29,7 +32,8 @@ public class MainActivity extends BridgeActivity {
     /**
      * The party volume slider is the device's media volume in the app, so it matches the hardware buttons. The host
      * page comes from the Node server and has no Capacitor bridge, hence a plain JavaScript interface. It only
-     * exposes the media volume, so pages like the Spotify login that also load in this WebView can't do more.
+     * exposes the media volume (and whether this is a TV), so pages like the Spotify login that also load in this
+     * WebView can't do more.
      */
     public class VolumeBridge {
 
@@ -44,7 +48,27 @@ public class MainActivity extends BridgeActivity {
             int index = Math.round(Math.max(0, Math.min(100, percent)) * max / 100f);
             if (index != audio.getStreamVolume(AudioManager.STREAM_MUSIC)) audio.setStreamVolume(AudioManager.STREAM_MUSIC, index, 0);
         }
+
+        /** Android TV (e.g. NVIDIA Shield): the setup guide then sends the Spotify dashboard to a phone. */
+        @JavascriptInterface
+        public boolean isTv() {
+            return isTelevision();
+        }
     }
+
+    private boolean isTelevision() {
+        UiModeManager uiMode = getSystemService(UiModeManager.class);
+        return uiMode != null && uiMode.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION;
+    }
+
+    // Spotify's login and consent pages don't focus anything, so a TV remote first has to find the email field or the
+    // Agree button. The page renders after it has loaded, hence the short polling. Only moves the focus, nothing else
+    // on the page is touched.
+    private static final String FOCUS_FIRST_INPUT =
+        "(function () { var n = 0; var t = setInterval(function () {"
+            + " var i = document.querySelector('input:not([type=hidden]):not([disabled])')"
+            + " || document.querySelector('[data-testid=auth-accept]') || document.querySelector('button[type=submit]');"
+            + " if (i) { i.focus(); clearInterval(t); } else if (++n > 25) clearInterval(t); }, 200); })()";
 
     private int mediaVolumePercent() {
         int max = audio.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
@@ -63,6 +87,16 @@ public class MainActivity extends BridgeActivity {
         audio = getSystemService(AudioManager.class);
         WebView webView = bridge.getWebView();
         webView.addJavascriptInterface(new VolumeBridge(), "BeatVoteNative");
+        if (isTelevision()) {
+            bridge.setWebViewClient(new BridgeWebViewClient(bridge) {
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    super.onPageFinished(view, url);
+                    Uri uri = Uri.parse(url);
+                    if ("accounts.spotify.com".equals(uri.getHost())) view.evaluateJavascript(FOCUS_FIRST_INPUT, null);
+                }
+            });
+        }
         // Hardware buttons (or any other app) changed the volume: tell the page, which reports it to the party.
         // HyperOS ramps the volume through intermediate steps, so only the value it settles on is reported.
         Handler main = new Handler(Looper.getMainLooper());

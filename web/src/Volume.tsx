@@ -1,4 +1,18 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * A range input takes all arrow keys, so a TV remote could never leave it. Up/down move on to the previous/next
+ * control instead; left/right still change the value.
+ */
+function leaveOnUpDown(e: KeyboardEvent<HTMLInputElement>) {
+  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  e.preventDefault();
+  const all = [...document.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  all[all.indexOf(e.currentTarget) + (e.key === 'ArrowUp' ? -1 : 1)]?.focus();
+}
 
 /**
  * Volume slider shared by host and guests. While someone drags, their own value wins and is sent with a short
@@ -32,6 +46,7 @@ export function VolumeSlider({
         value={local}
         disabled={disabled}
         aria-label="Volume"
+        onKeyDown={leaveOnUpDown}
         onChange={(e) => {
           const v = Number(e.target.value);
           setLocal(v);

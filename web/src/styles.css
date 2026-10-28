@@ -5,10 +5,13 @@
   --muted: #9d9bb3;
   --accent: #8b5cf6;
   --warn: #fbbf24;
+  color-scheme: dark;
 }
+/* Light follows the device, unless the host chose a theme ("Dark mode" switch, data-theme on <html>). */
 @media (prefers-color-scheme: light) {
-  :root { --bg: #f5f4fa; --card: #fff; --text: #1a1927; --muted: #6b6a80; --warn: #b45309; }
+  :root:not([data-theme='dark']) { --bg: #f5f4fa; --card: #fff; --text: #1a1927; --muted: #6b6a80; --warn: #b45309; color-scheme: light; }
 }
+:root[data-theme='light'] { --bg: #f5f4fa; --card: #fff; --text: #1a1927; --muted: #6b6a80; --warn: #b45309; color-scheme: light; }
 * { box-sizing: border-box; }
 /* The Android app draws edge to edge; Capacitor provides the --safe-area-* values there. */
 body {
@@ -56,6 +59,8 @@ small, .muted { color: var(--muted); }
 .pill { padding: 2px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--muted); font-size: 0.85rem; white-space: nowrap; }
 .now { display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--card); border-radius: 12px; }
 .guestlink { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+/* Low landscape screens (TV, 960 × 540): a smaller QR code leaves room for the controls. */
+@media (orientation: landscape) and (max-height: 600px) { .guestlink img { width: 140px; height: 140px; } }
 .now > div { flex: 1; min-width: 0; }
 .bar { height: 6px; margin: 8px 0 4px; background: var(--bg); border-radius: 3px; overflow: hidden; }
 .bar > span { display: block; height: 100%; background: var(--accent); transition: width 0.4s linear; }
@@ -67,6 +72,10 @@ button.icon { padding: 6px 12px; }
 .copy .row code { flex: 1; min-width: 0; }
 a.button { display: block; width: fit-content; padding: 10px 16px; border-radius: 10px; background: var(--accent); color: #fff; text-decoration: none; }
 a.button.ghost { background: transparent; color: var(--text); border: 1px solid var(--muted); }
+/* TV remotes and keyboards: show clearly what is selected. */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.dashboard-qr { display: flex; align-items: center; gap: 16px; }
+.dashboard-qr img { border-radius: 8px; background: #fff; padding: 6px; flex: none; }
 .skip { margin-top: 8px; }
 .resume { display: flex; flex-direction: column; gap: 8px; }
 .volume { display: flex; flex-direction: row; align-items: center; gap: 10px; }
@@ -90,5 +99,7 @@ select { padding: 10px; border-radius: 10px; border: 1px solid var(--muted); bac
 .pin label { gap: 6px; }
 .pin select { padding: 4px 8px; font-size: 0.85rem; border-radius: 8px; }
 .pin button { padding: 4px 12px; font-size: 0.85rem; border-radius: 8px; }
+.move { display: flex; gap: 4px; flex: none; }
+.move button { padding: 4px 8px; }
 .pin + .volume { margin-top: 12px; }
 .checks { display: flex; flex-wrap: wrap; gap: 4px 20px; }

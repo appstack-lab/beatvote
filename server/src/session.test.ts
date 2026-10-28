@@ -48,6 +48,48 @@ describe('playWish', () => {
   });
 });
 
+describe('upNext', () => {
+  it('names the request the DJ plays next, and none when it would pick a track itself', async () => {
+    const { createSession } = await restart();
+    const s = createSession(provider);
+    s.token = 'tok';
+    expect(s.state().upNext).toBeNull();
+    await s.addWish('g1', { ...track('a'), artistId: 'x' });
+    await s.addWish('g2', { ...track('b'), artistId: 'y' });
+    await s.addWish('g3', { ...track('b'), artistId: 'y' }); // second vote
+    const id = s.state().upNext;
+    expect(s.state().wishes.find((w) => w.id === id)?.track.id).toBe('b');
+    expect((await s.next())?.track.id).toBe('b');
+  });
+});
+
+describe('host order', () => {
+  it('plays the requests in the order the host arranged, new ones at the end, until back to votes', async () => {
+    const { createSession } = await restart();
+    const genres: Record<string, string[]> = { m: ['metalcore'], e: ['electro'], r: ['hard rock'] };
+    const s = createSession({ ...provider, artistGenres: async (_t, artistId) => genres[artistId] });
+    s.token = 'tok';
+    await s.addWish('g1', { ...track('metal'), artistId: 'm' });
+    await s.addWish('g2', { ...track('edm'), artistId: 'e' });
+    await s.addWish('g3', { ...track('edm'), artistId: 'e' }); // most votes: first by votes
+    const names = () => s.state().wishes.map((w) => w.track.id);
+    const id = (t: string) => s.state().wishes.find((w) => w.track.id === t)!.id;
+    expect(names()).toEqual(['edm', 'metal']);
+
+    s.moveWish(id('metal'), 'up');
+    expect(names()).toEqual(['metal', 'edm']);
+    expect(s.state()).toMatchObject({ manualOrder: true, upNext: id('metal') });
+    await s.addWish('g4', { ...track('rock'), artistId: 'r' });
+    await s.addWish('g5', { ...track('rock'), artistId: 'r' }); // votes don't lift it over the host's order
+    expect(names()).toEqual(['metal', 'edm', 'rock']);
+    expect((await s.next())?.track.id).toBe('metal');
+
+    s.orderByVotes();
+    expect(names()).toEqual(['edm', 'rock']); // equal votes: the earlier request first
+    expect(s.state().manualOrder).toBe(false);
+  });
+});
+
 describe('auto-fill', () => {
   it('continues in the last real genre after an unknown song, without repeats', async () => {
     const { createSession } = await restart();
@@ -95,7 +137,7 @@ describe('auto-fill', () => {
 
     const next = await s.next();
     expect(next?.track.id).toBe('ev');
-    expect(calls).toEqual(['rock 1990-2010']);
+    expect(calls).toEqual(['alternative rock 1990-2010']); // the phase's finer style comes first
 
     const after = await restart();
     after.restoreSessions(provider);
@@ -152,8 +194,8 @@ describe('auto-fill', () => {
     const s = createSession({
       ...provider,
       artistGenres: async () => ['metalcore'],
-      searchByGenre: async (_t, _g, years, offset) => {
-        if (years) offsets.add(offset);
+      searchByGenre: async (_t, g, years, offset) => {
+        if (years && g === 'metal') offsets.add(offset);
         return years ? [{ ...track('sb2'), artistId: 'spiritbox', year: 2023 }] : [{ ...track('soad'), artistId: 'soad', year: 2001 }];
       },
     });
@@ -162,6 +204,27 @@ describe('auto-fill', () => {
     await s.next();
     expect((await s.next())?.track.id).toBe('sb2');
     expect(offsets.size).toBe(5); // five different result pages of the phase
+  });
+
+  it('searches the finer style of the phase before the whole family', async () => {
+    const { createSession } = await restart();
+    const searched: string[] = [];
+    const s = createSession({
+      ...provider,
+      artistGenres: async () => ['metalcore', 'post-hardcore', 'alternative metal'],
+      searchByGenre: async (_t, g) => {
+        searched.push(g ?? '');
+        // Power metal only turns up when searching all of metal.
+        return g === 'metalcore'
+          ? [{ ...track('mc'), artistId: 'architects', year: 2021 }]
+          : [{ ...track('pm'), artistId: 'sabaton', year: 2022 }];
+      },
+    });
+    s.token = 'tok';
+    await s.addWish('g1', { ...track('bo'), artistId: 'badomens', year: 2022 });
+    await s.next();
+    expect((await s.next())?.track.id).toBe('mc');
+    expect(searched).toEqual(['metalcore']);
   });
 
   it('ends the phase window this year', async () => {

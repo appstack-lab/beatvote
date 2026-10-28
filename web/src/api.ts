@@ -43,6 +43,9 @@ export const api = {
     post(`/sessions/${code}/progress`, { hostKey, positionMs, paused }),
   playWish: (code: string, hostKey: string, id: string) =>
     post<{ track: Track; genre: string }>(`/sessions/${code}/wishes/${id}/play`, { hostKey }),
+  moveWish: (code: string, hostKey: string, id: string, direction: 'up' | 'down') =>
+    post(`/sessions/${code}/wishes/${id}/move`, { hostKey, direction }),
+  orderByVotes: (code: string, hostKey: string) => post(`/sessions/${code}/order-by-votes`, { hostKey }),
 };
 
 /** Live session state over WebSocket with auto-reconnect. Guests pass their ID to count as online. */

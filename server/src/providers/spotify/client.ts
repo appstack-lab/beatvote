@@ -4,9 +4,29 @@ import type { MusicProvider } from '../types';
 
 const API = 'https://api.spotify.com/v1';
 
+// After a 429 every further request would only extend Spotify's block, so none is sent until Retry-After has passed.
+let blockedUntil = 0;
+
+function rateLimited(seconds: number): Error {
+  const wait =
+    seconds < 120
+      ? `${seconds} s`
+      : seconds < 7200
+        ? `${Math.round(seconds / 60)} min`
+        : `${Math.round(seconds / 3600)} h`;
+  return new Error(`Spotify rate limit reached, try again in ${wait}`);
+}
+
 async function get<T>(token: string, path: string): Promise<T> {
+  const wait = Math.ceil((blockedUntil - Date.now()) / 1000);
+  if (wait > 0) throw rateLimited(wait);
   const res = await fetch(`${API}${path}`, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 429) throw new Error('Spotify rate limit reached, try again shortly');
+  if (res.status === 429) {
+    const seconds = Number(res.headers.get('retry-after')) || 30;
+    blockedUntil = Date.now() + seconds * 1000;
+    console.warn(`Spotify rate limit, waiting ${seconds} s`);
+    throw rateLimited(seconds);
+  }
   if (res.status === 401) throw new Error('Spotify token expired');
   if (!res.ok) throw new Error(`Spotify ${res.status} on ${path}`);
   return (await res.json()) as T;

@@ -4,7 +4,7 @@ import { decideNext } from './dj/decide';
 import { fitsEra } from './dj/era';
 import { DECADES, isPinned, matchesPin, type Pin } from '../../shared/src/era';
 import { GENRE_NAMES } from '../../shared/src/genres';
-import { normalizeGenre, UNKNOWN_GENRE } from './dj/genre';
+import { normalizeGenre, phaseStyle, styleOf, UNKNOWN_GENRE } from './dj/genre';
 import { DEFAULT_CONFIG, wishScore } from './dj/scoring';
 import type { MusicProvider } from './providers/types';
 import { readSnapshots, writeSnapshots } from './store';
@@ -15,6 +15,10 @@ const DEFAULT_VOLUME = 80;
 const RECENT_ARTIST_TRACKS = 20;
 /** Auto-fill searches up to this many result pages (10 tracks each) of the phase, out of the first AUTO_FILL_PAGES. */
 const AUTO_FILL_PHASE_SEARCHES = 5;
+/** Result pages searched in the phase's finer style (e.g. "metalcore") before the whole family. */
+const AUTO_FILL_STYLE_SEARCHES = 3;
+/** The phase's style comes from this many of its latest tracks. */
+const PHASE_STYLE_TRACKS = 5;
 const AUTO_FILL_PAGES = Array.from({ length: 10 }, (_, i) => i);
 /** When to look up an unknown genre again after a wish came in. */
 const GENRE_RETRY_DELAYS_MS = [30_000, 2 * 60_000, 10 * 60_000];
@@ -42,6 +46,10 @@ interface SessionSnapshot {
   guestSkip?: boolean;
   pinnedGenre?: string | null;
   pinnedDecade?: number | null;
+  /** Finer styles of the phase's latest tracks; missing in snapshots from before styles. */
+  phaseStyles?: string[];
+  /** Request ids in the host's order; missing or null: by votes. */
+  order?: string[] | null;
 }
 
 export class Session {
@@ -57,6 +65,11 @@ export class Session {
   private history: SessionState['history'] = [];
   private lastSwitch: SessionState['lastSwitch'] = null;
   private genreCache = new Map<string, string>();
+  /** Raw genre tags per artist, for the phase's finer style. */
+  private tagCache = new Map<string, string[]>();
+  private phaseStyles: string[] = [];
+  /** The host's own order of the requests (ids); null: by votes. Requests added later go to the end. */
+  private order: string[] | null = null;
   private listeners = new Set<() => void>();
   private updatedAt = Date.now();
   private volume = DEFAULT_VOLUME;
@@ -87,6 +100,8 @@ export class Session {
     session.guestSkip = s.guestSkip ?? true;
     session.pinnedGenre = s.pinnedGenre ?? null;
     session.pinnedDecade = s.pinnedDecade ?? null;
+    session.phaseStyles = s.phaseStyles ?? [];
+    session.order = s.order ?? null;
     for (const w of session.wishes) if (w.genre === UNKNOWN_GENRE) session.retryGenre(w.id);
     return session;
   }
@@ -108,6 +123,8 @@ export class Session {
       guestSkip: this.guestSkip,
       pinnedGenre: this.pinnedGenre,
       pinnedDecade: this.pinnedDecade,
+      phaseStyles: this.phaseStyles,
+      order: this.order,
     };
   }
 
@@ -135,9 +152,9 @@ export class Session {
   }
 
   state(now = Date.now()): SessionState {
-    const wishes: PublicWish[] = this.wishes
-      .map((w) => ({ ...w, score: wishScore(w, now) }))
-      .sort((a, b) => b.score - a.score);
+    const manual = this.manualOrder();
+    const wishes: PublicWish[] = (manual ?? this.wishes).map((w) => ({ ...w, score: wishScore(w, now) }));
+    if (!manual) wishes.sort((a, b) => b.score - a.score);
     return {
       code: this.code,
       currentGenre: this.currentGenre,
@@ -153,7 +170,58 @@ export class Session {
       guestVolume: this.guestVolume,
       guestSkip: this.guestSkip,
       pin: this.pin(),
+      upNext: (this.manualNext() ?? this.decide(now).wish)?.id ?? null,
+      manualOrder: manual !== null,
     };
+  }
+
+  /** The requests in the host's order, or null while they go by votes. */
+  private manualOrder(): Wish[] | null {
+    if (!this.order) return null;
+    const byId = new Map(this.wishes.map((w) => [w.id, w]));
+    const listed = this.order.map((id) => byId.get(id)).filter((w): w is Wish => !!w);
+    const added = this.wishes.filter((w) => !this.order!.includes(w.id)).sort((a, b) => a.addedAt - b.addedAt);
+    return [...listed, ...added];
+  }
+
+  /** In the host's order, the first request that fits the host's genre/decade pick plays next. */
+  private manualNext(): Wish | null {
+    const pin = this.pin();
+    return this.manualOrder()?.find((w) => !isPinned(pin) || matchesPin(pin, w.genre, w.track.year)) ?? null;
+  }
+
+  /** The host moves a request one place; from then on the host's order counts instead of the votes. */
+  moveWish(id: string, direction: 'up' | 'down'): void {
+    const ids = (this.manualOrder() ?? this.state().wishes).map((w) => w.id);
+    const i = ids.indexOf(id);
+    if (i < 0) throw new HttpError(404, 'Request not found');
+    const j = direction === 'up' ? i - 1 : i + 1;
+    if (j >= 0 && j < ids.length) [ids[i], ids[j]] = [ids[j], ids[i]];
+    this.order = ids;
+    this.emit();
+  }
+
+  /** Back to ordering the requests by votes (and the DJ's genre rule). */
+  orderByVotes(): void {
+    this.order = null;
+    this.emit();
+  }
+
+  /** The DJ's choice among the requests (see decideNext), honouring the host's genre/decade pick. */
+  private decide(now: number) {
+    const pin = this.pin();
+    // While the host has fixed a genre/decade, only matching requests count; the others wait on the list.
+    const wishes = isPinned(pin) ? this.wishes.filter((w) => matchesPin(pin, w.genre, w.track.year)) : this.wishes;
+    const phaseGenre = pin.genre ?? this.currentGenre;
+    return decideNext(
+      {
+        wishes,
+        currentGenre: phaseGenre,
+        currentEra: pin.decade !== null ? pin.decade + 5 : this.currentEra,
+        songsInGenre: phaseGenre === this.currentGenre ? this.songsInGenre : 0,
+      },
+      now,
+    );
   }
 
   private requireToken(): string {
@@ -170,6 +238,7 @@ export class Session {
     if (cached) return cached;
     const raw = await this.provider.artistGenres(this.requireToken(), track.artistId);
     const genre = normalizeGenre(raw);
+    if (raw.length) this.tagCache.set(track.artistId, raw);
     // Not cached when unknown, so a later wish for the same artist tries again.
     if (genre === UNKNOWN_GENRE) console.warn(`unknown genre for ${track.artists} (${track.artistId}), tags: ${JSON.stringify(raw)}`);
     else this.genreCache.set(track.artistId, genre);
@@ -300,18 +369,13 @@ export class Session {
     const now = Date.now();
     const pin = this.pin();
     const pinned = isPinned(pin);
-    // While the host has fixed a genre/decade, only matching requests count; the others wait on the list.
-    const wishes = pinned ? this.wishes.filter((w) => matchesPin(pin, w.genre, w.track.year)) : this.wishes;
-    const phaseGenre = pin.genre ?? this.currentGenre;
-    const decision = decideNext(
-      {
-        wishes,
-        currentGenre: phaseGenre,
-        currentEra: pin.decade !== null ? pin.decade + 5 : this.currentEra,
-        songsInGenre: phaseGenre === this.currentGenre ? this.songsInGenre : 0,
-      },
-      now,
-    );
+    // The host arranged the requests by hand: play them in that order, like a host pick.
+    const manual = this.manualNext();
+    if (manual) {
+      this.wishes = this.wishes.filter((w) => w.id !== manual.id);
+      return this.playNow(manual.track, manual.genre);
+    }
+    const decision = this.decide(now);
 
     if (decision.wish && decision.genre) {
       this.wishes = this.wishes.filter((w) => w.id !== decision.wish!.id);
@@ -332,7 +396,9 @@ export class Session {
     if (!genre && !years) return null;
     // A picked decade is a hard rule, so is a picked genre; the DJ's own genre and time window may be dropped
     // rather than stop the music.
-    const track = await this.autoFill(token, genre, years, {
+    // Within the DJ's own genre, search its finer style first (metalcore rather than any metal).
+    const style = genre !== null && genre === this.currentGenre ? phaseStyle(this.phaseStyles) : null;
+    const track = await this.autoFill(token, genre, style, years, {
       mayDropYears: pin.decade === null,
       mayDropGenre: pin.genre === null && pin.decade !== null,
     });
@@ -358,6 +424,7 @@ export class Session {
   private async autoFill(
     token: string,
     genre: string | null,
+    style: string | null,
     years: { from: number; to: number } | undefined,
     relax: { mayDropYears: boolean; mayDropGenre: boolean },
   ): Promise<Track | undefined> {
@@ -368,7 +435,7 @@ export class Session {
       tracks.sort((a, b) => (lastHeard.get(a.artistId) ?? -1) - (lastHeard.get(b.artistId) ?? -1))[0];
 
     // Different result pages in random order: the top results of a phase come from few artists.
-    const search = async (g: string | null, range: typeof years, pages: number) => {
+    const search = async (g: string | null, range: typeof years, pages: number, takeRepeats = true) => {
       const repeats: Track[] = [];
       for (const page of shuffled(AUTO_FILL_PAGES).slice(0, pages)) {
         const candidates = (await this.provider.searchByGenre(token, g, range, page * 10)).filter(
@@ -378,9 +445,12 @@ export class Session {
         if (fresh) return fresh;
         repeats.push(...candidates);
       }
-      return heardLongestAgo(repeats);
+      return takeRepeats ? heardLongestAgo(repeats) : undefined;
     };
 
+    // A fresh artist in the style first; a repeated one only after the whole family had nothing fresh either.
+    const inStyle = style ? await search(style, years, AUTO_FILL_STYLE_SEARCHES, false) : undefined;
+    if (inStyle) return inStyle;
     const inPhase = await search(genre, years, AUTO_FILL_PHASE_SEARCHES);
     if (inPhase) return inPhase;
     // Nothing unplayed in the phase: rather close than silence.
@@ -420,11 +490,15 @@ export class Session {
       this.currentGenre = genre;
       this.currentEra = toEra;
       this.songsInGenre = 0;
+      this.phaseStyles = [];
     } else if (this.currentEra === null && track.year !== undefined && genre === this.currentGenre) {
       // Phases from before years were recorded get their reference year from the first song that has one.
       this.currentEra = track.year;
     }
     this.songsInGenre += 1;
+    const tags = this.tagCache.get(track.artistId);
+    const style = tags && genre === this.currentGenre ? styleOf(tags, genre) : null;
+    if (style) this.phaseStyles = [...this.phaseStyles, style].slice(-PHASE_STYLE_TRACKS);
     const previous = this.history.at(-1);
     if (previous && this.nowPlaying?.skipRequested) previous.skipped = true;
     this.nowPlaying = { track, genre, startedAt: now, auto };

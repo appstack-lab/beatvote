@@ -176,6 +176,21 @@ app.post<{ Params: { code: string }; Body: { hostKey: string; positionMs: number
   },
 );
 
+app.post<{ Params: { code: string; id: string }; Body: { hostKey: string; direction: 'up' | 'down' } }>(
+  '/api/sessions/:code/wishes/:id/move',
+  async (req) => {
+    const { direction } = req.body;
+    if (direction !== 'up' && direction !== 'down') throw new HttpError(400, 'Direction must be up or down');
+    hostSession(req.params.code, req.body.hostKey).moveWish(req.params.id, direction);
+    return { ok: true };
+  },
+);
+
+app.post<{ Params: { code: string }; Body: { hostKey: string } }>('/api/sessions/:code/order-by-votes', async (req) => {
+  hostSession(req.params.code, req.body.hostKey).orderByVotes();
+  return { ok: true };
+});
+
 app.post<{ Params: { code: string; id: string }; Body: { hostKey: string } }>(
   '/api/sessions/:code/wishes/:id/play',
   async (req) => hostSession(req.params.code, req.body.hostKey).playWish(req.params.id),
