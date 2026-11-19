@@ -20,7 +20,7 @@ import {
   startLogin,
   type Tokens,
 } from './spotifyAuth';
-import { isTv, NATIVE_VOLUME_EVENT, nativeVolume } from './native';
+import { isTv, NATIVE_VOLUME_EVENT, nativeVolume, setDarkBars } from './native';
 import { usePlayer, type ConnectDevice } from './usePlayer';
 
 // The party (code + host key) lives in localStorage so closing the app does not lose it. Older builds kept it
@@ -115,13 +115,14 @@ function loadTheme(): 'dark' | 'light' | null {
   }
 }
 
+const systemLight = () => matchMedia('(prefers-color-scheme: light)');
+
+/** Without a choice, the CSS follows the device by itself; the app's status bar icons are told the result. */
 function applyTheme(theme: 'dark' | 'light' | null) {
   if (theme) document.documentElement.dataset.theme = theme;
   else delete document.documentElement.dataset.theme;
+  setDarkBars((theme ?? (systemLight().matches ? 'light' : 'dark')) === 'dark');
 }
-
-const isDark = () =>
-  (loadTheme() ?? (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')) === 'dark';
 
 /** What everyone at the party sees on the host's screen: the music and the QR code, no settings. */
 function PartyScreen({
@@ -478,9 +479,18 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   const [saved, setSaved] = useState<Party | null>(loadParty);
   const [state, setState] = useState<SessionState | null>(null);
   const tokenRef = useRef(tokens);
+  // One refresh at a time. Callers wait for a fresh token instead of using an expired one: after the app was closed
+  // for over an hour, the web player would otherwise log in with the stored token and fail ("Authentication failed").
+  const refreshing = useRef<Promise<Tokens> | null>(null);
+  const renewToken = () =>
+    (refreshing.current ??= refresh(tokenRef.current.refreshToken)
+      .then((t) => (tokenRef.current = t))
+      .finally(() => (refreshing.current = null)));
+  const freshToken = async () =>
+    tokenRef.current.expiresAt - Date.now() > 60_000 ? tokenRef.current.accessToken : (await renewToken()).accessToken;
   const [err, setErr] = useState<string | null>(null);
   const [output, setOutput] = useState<Output | null>(loadOutput);
-  const [dark, setDark] = useState(isDark);
+  const [theme, setTheme] = useState(loadTheme);
   const [partyScreen, setPartyScreen] = useState(() => {
     try {
       return localStorage.getItem(VIEW_KEY) === 'party';
@@ -504,7 +514,7 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   nowUri.current = state?.nowPlaying?.track.uri;
 
   const player = usePlayer({
-    getToken: () => tokenRef.current.accessToken,
+    getToken: freshToken,
     fetchNext: async () => {
       if (!session) return null;
       return api.next(session.code, session.hostKey);
@@ -526,8 +536,14 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
   useEffect(() => {
     if (!session) return;
     let timer: ReturnType<typeof setTimeout>;
-    const push = () =>
-      api.sendToken(session.code, session.hostKey, tokenRef.current.accessToken).catch((e) => setErr(e.message));
+    let stopped = false;
+    const push = async () => {
+      try {
+        await api.sendToken(session.code, session.hostKey, await freshToken());
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    };
     // Heartbeat: if the server restarted, this recreates the session under the same code
     // and hands it the token again, so the party continues and the guest QR code stays valid.
     const ensure = async () => {
@@ -546,10 +562,11 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
     };
     const heartbeat = setInterval(ensure, 10_000);
     const schedule = () => {
+      if (stopped) return;
       const wait = Math.max(5_000, tokenRef.current.expiresAt - Date.now() - 120_000);
       timer = setTimeout(async () => {
         try {
-          tokenRef.current = await refresh(tokenRef.current.refreshToken);
+          await renewToken();
           await push();
         } catch (e) {
           setErr(e instanceof Error ? e.message : String(e));
@@ -557,9 +574,10 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
         schedule();
       }, wait);
     };
-    void ensure().then(push);
-    schedule();
+    // The first push renews an expired token, so the timer starts from the fresh one.
+    void ensure().then(push).then(schedule);
     return () => {
+      stopped = true;
       clearTimeout(timer);
       clearInterval(heartbeat);
     };
@@ -792,21 +810,26 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
                       Guests can vote to skip
                     </label>
                     <label className="check">
-                      <input
-                        type="checkbox"
-                        checked={dark}
+                      Theme
+                      <select
+                        value={theme ?? 'device'}
                         onChange={(e) => {
-                          const theme = e.target.checked ? 'dark' : 'light';
-                          setDark(e.target.checked);
-                          applyTheme(theme);
+                          const v = e.target.value;
+                          const next = v === 'dark' || v === 'light' ? v : null;
+                          setTheme(next);
+                          applyTheme(next);
                           try {
-                            localStorage.setItem(THEME_KEY, theme);
+                            if (next) localStorage.setItem(THEME_KEY, next);
+                            else localStorage.removeItem(THEME_KEY);
                           } catch {
-                            // Not remembered then; the switch still works until the app closes.
+                            // Not remembered then; the choice still works until the app closes.
                           }
                         }}
-                      />
-                      Dark mode
+                      >
+                        <option value="device">Like device</option>
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                      </select>
                     </label>
                   </div>
                 </>
@@ -902,7 +925,14 @@ function Console({ tokens, onLogout }: { tokens: Tokens; onLogout: () => void })
 
 export function Host() {
   const [tokens, setTokens] = useState<Tokens | null>(loadTokens());
-  useLayoutEffect(() => applyTheme(loadTheme()), []);
+  useLayoutEffect(() => {
+    applyTheme(loadTheme());
+    // The device switched between light and dark (e.g. automatically in the evening).
+    const mq = systemLight();
+    const onChange = () => applyTheme(loadTheme());
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
   const [busy, setBusy] = useState(location.pathname.startsWith('/callback'));
   const [error, setError] = useState<string | null>(null);
 

@@ -29,7 +29,8 @@ export interface ConnectDevice {
 }
 
 interface Options {
-  getToken: () => string;
+  /** A valid access token; waits for a refresh when the stored one has (nearly) expired. */
+  getToken: () => Promise<string>;
   /** Asks the server's DJ for the next track. */
   fetchNext: FetchTrack;
   /** Spotify Connect device to play on; null plays in this page (Web Playback SDK). */
@@ -83,10 +84,10 @@ export function usePlayer({ getToken, fetchNext, output, currentUri }: Options) 
   currentUriRef.current = currentUri;
 
   const spotify = useCallback(
-    (path: string, init?: RequestInit) =>
+    async (path: string, init?: RequestInit) =>
       fetch(`https://api.spotify.com/v1${path}`, {
         ...init,
-        headers: { Authorization: `Bearer ${getTokenRef.current()}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${await getTokenRef.current()}`, 'Content-Type': 'application/json' },
       }),
     [],
   );
@@ -101,7 +102,12 @@ export function usePlayer({ getToken, fetchNext, output, currentUri }: Options) 
       if (cancelled) return;
       const player = new Spotify.Player({
         name: 'BeatVote',
-        getOAuthToken: (cb) => cb(getTokenRef.current()),
+        getOAuthToken: (cb) => {
+          getTokenRef.current().then(cb, (e: unknown) => {
+            setError(e instanceof Error ? e.message : String(e));
+            setStatus('error');
+          });
+        },
         volume: volumeRef.current,
       });
       player.addListener('ready', ({ device_id }) => {

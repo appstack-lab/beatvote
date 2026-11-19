@@ -22,8 +22,14 @@ export function Progress({ positionMs, durationMs }: { positionMs: number; durat
       <div className="bar">
         <span style={{ width: `${pct}%` }} />
       </div>
-      <small>
-        {formatTime(positionMs)} / {formatTime(durationMs)} · <b>{formatTime(durationMs - positionMs)}</b> left
+      {/* Tabular digits keep the width constant while the time runs; if the line must wrap, it wraps at the dot. */}
+      <small className="time">
+        <span>
+          {formatTime(positionMs)} / {formatTime(durationMs)}
+        </span>{' '}
+        <span>
+          · <b>{formatTime(durationMs - positionMs)}</b> left
+        </span>
       </small>
     </>
   );

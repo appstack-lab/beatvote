@@ -20,6 +20,8 @@ import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebViewClient;
 
@@ -33,7 +35,7 @@ public class MainActivity extends BridgeActivity {
      * The party volume slider is the device's media volume in the app, so it matches the hardware buttons. The host
      * page comes from the Node server and has no Capacitor bridge, hence a plain JavaScript interface. It only
      * exposes the media volume (and whether this is a TV), so pages like the Spotify login that also load in this
-     * WebView can't do more.
+     * WebView can't do more. Besides that it only sets the color of the system bar icons.
      */
     public class VolumeBridge {
 
@@ -54,6 +56,18 @@ public class MainActivity extends BridgeActivity {
         public boolean isTv() {
             return isTelevision();
         }
+
+        /** The page is dark (by its own setting or the device's): light icons in the status and navigation bar. */
+        @JavascriptInterface
+        public void setDarkTheme(boolean dark) {
+            runOnUiThread(() -> setDarkBars(dark));
+        }
+    }
+
+    private void setDarkBars(boolean dark) {
+        WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+        bars.setAppearanceLightStatusBars(!dark);
+        bars.setAppearanceLightNavigationBars(!dark);
     }
 
     private boolean isTelevision() {
@@ -80,6 +94,8 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         // The host device sits on the DJ screen for the whole party; going to sleep would stop the player.
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // Until the host page says otherwise (its own theme setting), the bars follow the device.
+        setDarkBars((getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES);
         // Spotify's player starts each new track itself, not in response to a tap.
         bridge.getWebView().getSettings().setMediaPlaybackRequiresUserGesture(false);
 

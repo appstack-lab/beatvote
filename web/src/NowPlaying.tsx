@@ -31,7 +31,11 @@ export function NowPlaying({
   if (!np) return null;
   return (
     <section className="now">
-      {np.track.image && <img src={np.track.image} alt="" width={64} height={64} />}
+      {np.track.image && (
+        <div className="cover-frame">
+          <img src={np.track.image} alt="" width={64} height={64} />
+        </div>
+      )}
       <div className="now-info">
         <b>{np.track.name}</b>
         <div>{withYear(np.track)}</div>

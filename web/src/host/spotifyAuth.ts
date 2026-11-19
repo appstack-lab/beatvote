@@ -67,7 +67,7 @@ async function tokenRequest(body: Record<string, string>): Promise<Tokens> {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: getClientId(), ...body }),
   });
-  if (!res.ok) throw new Error(`Spotify-Login fehlgeschlagen (${res.status})`);
+  if (!res.ok) throw new Error(`Spotify login failed (${res.status})`);
   const data = await res.json();
   const tokens: Tokens = {
     accessToken: data.access_token,
